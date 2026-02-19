@@ -1,6 +1,6 @@
 PYTHON ?= python
 
-.PHONY: setup data preprocess retrieval ranking eval baseline daily service test docker-build docker-up
+.PHONY: setup data preprocess retrieval ranking eval baseline daily service test docker-build docker-up smoke
 
 setup:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -33,6 +33,14 @@ service:
 
 test:
 	$(PYTHON) -m pytest
+
+smoke:
+	$(PYTHON) data/download_movielens.py --dataset ml-latest-small
+	$(PYTHON) data/preprocess.py --dataset-dir data/raw/ml-latest-small
+	$(PYTHON) retrieval/train.py --epochs 2 --embedding-dim 32 --num-negatives 8 --batch-size 512 --max-history-len 40 --learning-rate 1e-3
+	$(PYTHON) retrieval/build_index.py
+	$(PYTHON) ranking/train.py --retrieval-mode hybrid --train-candidate-k 80 --eval-candidate-k 120 --max-queries-per-user 8 --num-boost-round 120 --learning-rate 0.05 --num-leaves 63 --early-stopping-rounds 20 --n-jobs 1 --min-ranker-improve 0.005
+	$(PYTHON) eval/offline_eval.py --retrieval-mode hybrid --retrieval-k 120 --ranking-k 10 --latency-warmup 30
 
 docker-build:
 	docker compose build

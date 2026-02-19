@@ -208,3 +208,21 @@ docker compose up
 ```
 
 Service will be available at `http://127.0.0.1:8000`.
+
+## GitHub Automation
+
+Included workflows:
+
+- `CI` (`.github/workflows/ci.yml`): compile + unit tests on push/PR
+- `Docker Image` (`.github/workflows/docker-image.yml`): validates Docker build on push/PR
+- `Smoke Pipeline` (`.github/workflows/smoke-pipeline.yml`): manual end-to-end training/eval smoke run
+
+Additional GitHub config files:
+
+- Dependabot: `.github/dependabot.yml`
+- Issue templates: `.github/ISSUE_TEMPLATE/`
+- PR template: `.github/pull_request_template.md`
+- CODEOWNERS: `.github/CODEOWNERS`
+- Security policy: `SECURITY.md`
+- Contribution guide: `CONTRIBUTING.md`
+- Branch protection recommendations: `docs/GITHUB_SETUP.md`

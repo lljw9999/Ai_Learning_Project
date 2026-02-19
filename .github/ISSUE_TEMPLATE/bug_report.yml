@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a reproducible bug
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include exact commands and logs.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A concise description of the bug.
+      placeholder: Describe expected vs actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include exact commands and inputs.
+      placeholder: |
+        1. Run `...`
+        2. Run `...`
+        3. Observe `...`
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste stack traces / errors.
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS / Python / dependency versions.
+      placeholder: macOS 15, Python 3.13, lightgbm 4.3.0

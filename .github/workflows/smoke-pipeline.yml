@@ -1,0 +1,54 @@
+name: Smoke Pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Data preprocess (MovieLens small)
+        run: |
+          python data/download_movielens.py --dataset ml-latest-small
+          python data/preprocess.py --dataset-dir data/raw/ml-latest-small
+
+      - name: Train retrieval (smoke config)
+        run: |
+          python retrieval/train.py --epochs 2 --embedding-dim 32 --num-negatives 8 --batch-size 512 --max-history-len 40 --learning-rate 1e-3
+          python retrieval/build_index.py
+
+      - name: Train ranking (smoke config)
+        run: |
+          python ranking/train.py --retrieval-mode hybrid --train-candidate-k 80 --eval-candidate-k 120 --max-queries-per-user 8 --num-boost-round 120 --learning-rate 0.05 --num-leaves 63 --early-stopping-rounds 20 --n-jobs 1 --min-ranker-improve 0.005
+
+      - name: Offline eval (smoke)
+        run: |
+          python eval/offline_eval.py --retrieval-mode hybrid --retrieval-k 120 --ranking-k 10 --latency-warmup 30
+          python eval/retrieval_baselines.py --top-k 120
+
+      - name: Upload evaluation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-eval-artifacts
+          path: |
+            artifacts/eval/offline_metrics.json
+            artifacts/eval/retrieval_baselines.json

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage and setup questions
+    url: https://github.com/lljw9999/Ai_Learning_Project/discussions
+    about: Please use discussions for questions that are not clear bugs.
