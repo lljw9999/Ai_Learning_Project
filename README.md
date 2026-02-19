@@ -1,5 +1,8 @@
 # Two-Stage Recommender: Retrieval (Two-Tower + Item-CF Hybrid) + Ranking (LightGBM)
 
+[![CI](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/ci.yml/badge.svg)](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/ci.yml)
+[![Docker Image](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/docker-image.yml/badge.svg)](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/docker-image.yml)
+
 A production-style recommender pipeline with:
 
 1. Time-based data split (leave-two-out per user)
@@ -226,3 +229,9 @@ Additional GitHub config files:
 - Security policy: `SECURITY.md`
 - Contribution guide: `CONTRIBUTING.md`
 - Branch protection recommendations: `docs/GITHUB_SETUP.md`
+
+Apply branch protection/settings automatically (after `gh auth login`):
+
+```bash
+make github-harden
+```

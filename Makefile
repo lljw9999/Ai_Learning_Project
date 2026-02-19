@@ -1,6 +1,6 @@
 PYTHON ?= python
 
-.PHONY: setup data preprocess retrieval ranking eval baseline daily service test docker-build docker-up smoke
+.PHONY: setup data preprocess retrieval ranking eval baseline daily service test docker-build docker-up smoke github-harden
 
 setup:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -47,3 +47,6 @@ docker-build:
 
 docker-up:
 	docker compose up
+
+github-harden:
+	./scripts/apply_github_hardening.sh
