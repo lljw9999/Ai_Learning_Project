@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+.env
+.DS_Store
+artifacts/
+logs/
+*.log
+ml-*/
+data/raw/
+.pytest_cache/

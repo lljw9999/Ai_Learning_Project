@@ -1,0 +1,12 @@
+services:
+  recommender-api:
+    build: .
+    container_name: two-stage-recommender-api
+    environment:
+      - RETRIEVAL_MODE=hybrid
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    working_dir: /app
+    command: uvicorn service.app:app --host 0.0.0.0 --port 8000
