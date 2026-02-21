@@ -21,6 +21,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run multi-seed end-to-end reproducibility sweep")
     parser.add_argument("--seeds", default="11,22,33,44,55", help="Comma-separated random seeds")
     parser.add_argument("--skip-retrieval", action="store_true", help="Reuse existing retrieval model for all seeds")
+    parser.add_argument(
+        "--from-artifact",
+        type=Path,
+        default=None,
+        help="If set, reuse runs from an existing seed_sweep artifact and recompute aggregate summary only",
+    )
 
     # Retrieval config
     parser.add_argument("--retrieval-epochs", type=int, default=10)
@@ -49,6 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ranking-k", type=int, default=10)
     parser.add_argument("--candidate-k-grid", default="100,200,500")
     parser.add_argument("--latency-warmup", type=int, default=50)
+    parser.add_argument("--aggregate-bootstrap-samples", type=int, default=5000)
+    parser.add_argument("--aggregate-bootstrap-seed", type=int, default=42)
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
 
@@ -88,117 +96,162 @@ def _summary_stats(values: List[float]) -> Dict[str, float]:
     }
 
 
+def _bootstrap_mean_ci(
+    values: List[float],
+    n_bootstrap: int = 5000,
+    random_state: int = 42,
+) -> Dict[str, float]:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0:
+        return {"mean": 0.0, "ci95_low": 0.0, "ci95_high": 0.0}
+    rng = np.random.default_rng(random_state)
+    idx = rng.integers(0, arr.size, size=(max(int(n_bootstrap), 1), arr.size))
+    sampled_means = arr[idx].mean(axis=1)
+    return {
+        "mean": float(arr.mean()),
+        "ci95_low": float(np.percentile(sampled_means, 2.5)),
+        "ci95_high": float(np.percentile(sampled_means, 97.5)),
+    }
+
+
 def main() -> None:
     args = parse_args()
     ensure_dirs()
     seeds = _parse_seeds(args.seeds)
 
     runs: List[dict] = []
-    for seed in seeds:
-        if not args.skip_retrieval:
+    if args.from_artifact is not None:
+        existing = _read_json(args.from_artifact)
+        existing_runs = existing.get("runs", [])
+        if not isinstance(existing_runs, list):
+            raise ValueError("Invalid artifact format: missing runs list")
+        runs = list(existing_runs)
+        if not runs:
+            raise ValueError("Artifact has no runs")
+        seeds = [int(r.get("seed")) for r in runs]
+    else:
+        for seed in seeds:
+            if not args.skip_retrieval:
+                _run(
+                    [
+                        "python",
+                        "retrieval/train.py",
+                        "--epochs",
+                        str(args.retrieval_epochs),
+                        "--embedding-dim",
+                        str(args.retrieval_embedding_dim),
+                        "--num-negatives",
+                        str(args.retrieval_num_negatives),
+                        "--learning-rate",
+                        str(args.retrieval_learning_rate),
+                        "--batch-size",
+                        str(args.retrieval_batch_size),
+                        "--max-history-len",
+                        str(args.retrieval_max_history_len),
+                        "--seed",
+                        str(seed),
+                        "--device",
+                        args.device,
+                    ]
+                )
+                _run(["python", "retrieval/build_index.py"])
+
             _run(
                 [
                     "python",
-                    "retrieval/train.py",
-                    "--epochs",
-                    str(args.retrieval_epochs),
-                    "--embedding-dim",
-                    str(args.retrieval_embedding_dim),
-                    "--num-negatives",
-                    str(args.retrieval_num_negatives),
+                    "ranking/train.py",
+                    "--retrieval-mode",
+                    args.retrieval_mode,
+                    "--train-candidate-k",
+                    str(args.train_candidate_k),
+                    "--eval-candidate-k",
+                    str(args.eval_candidate_k),
+                    "--future-positive-window",
+                    str(args.future_positive_window),
+                    "--max-queries-per-user",
+                    str(args.max_queries_per_user),
+                    "--num-boost-round",
+                    str(args.num_boost_round),
                     "--learning-rate",
-                    str(args.retrieval_learning_rate),
-                    "--batch-size",
-                    str(args.retrieval_batch_size),
-                    "--max-history-len",
-                    str(args.retrieval_max_history_len),
+                    str(args.learning_rate),
+                    "--num-leaves",
+                    str(args.num_leaves),
+                    "--early-stopping-rounds",
+                    str(args.early_stopping_rounds),
                     "--seed",
+                    str(seed),
+                    "--min-ranker-improve",
+                    str(args.min_ranker_improve),
+                    "--guardrail-confidence",
+                    str(args.guardrail_confidence),
+                    "--guardrail-bootstrap-samples",
+                    str(args.guardrail_bootstrap_samples),
+                    "--guardrail-bootstrap-seed",
                     str(seed),
                     "--device",
                     args.device,
                 ]
             )
-            _run(["python", "retrieval/build_index.py"])
 
-        _run(
-            [
-                "python",
-                "ranking/train.py",
-                "--retrieval-mode",
-                args.retrieval_mode,
-                "--train-candidate-k",
-                str(args.train_candidate_k),
-                "--eval-candidate-k",
-                str(args.eval_candidate_k),
-                "--future-positive-window",
-                str(args.future_positive_window),
-                "--max-queries-per-user",
-                str(args.max_queries_per_user),
-                "--num-boost-round",
-                str(args.num_boost_round),
-                "--learning-rate",
-                str(args.learning_rate),
-                "--num-leaves",
-                str(args.num_leaves),
-                "--early-stopping-rounds",
-                str(args.early_stopping_rounds),
-                "--seed",
-                str(seed),
-                "--min-ranker-improve",
-                str(args.min_ranker_improve),
-                "--guardrail-confidence",
-                str(args.guardrail_confidence),
-                "--guardrail-bootstrap-samples",
-                str(args.guardrail_bootstrap_samples),
-                "--guardrail-bootstrap-seed",
-                str(seed),
-                "--device",
-                args.device,
-            ]
-        )
+            _run(
+                [
+                    "python",
+                    "eval/offline_eval.py",
+                    "--retrieval-mode",
+                    args.retrieval_mode,
+                    "--retrieval-k",
+                    str(args.retrieval_k),
+                    "--ranking-k",
+                    str(args.ranking_k),
+                    "--candidate-k-grid",
+                    args.candidate_k_grid,
+                    "--latency-warmup",
+                    str(args.latency_warmup),
+                    "--device",
+                    args.device,
+                ]
+            )
 
-        _run(
-            [
-                "python",
-                "eval/offline_eval.py",
-                "--retrieval-mode",
-                args.retrieval_mode,
-                "--retrieval-k",
-                str(args.retrieval_k),
-                "--ranking-k",
-                str(args.ranking_k),
-                "--candidate-k-grid",
-                args.candidate_k_grid,
-                "--latency-warmup",
-                str(args.latency_warmup),
-                "--device",
-                args.device,
-            ]
-        )
-
-        train_metrics = _read_json(RANKING_DIR / "train_metrics.json")
-        offline_metrics = _read_json(EVAL_DIR / "offline_metrics.json")
-        retrieval_ndcg = float(offline_metrics["retrieval_order_ranking"].get(f"ndcg@{args.ranking_k}", 0.0))
-        ranking_ndcg = float(offline_metrics["ranking"].get(f"ndcg@{args.ranking_k}", 0.0))
-        lift_abs = ranking_ndcg - retrieval_ndcg
-        lift_rel_pct = (lift_abs / retrieval_ndcg * 100.0) if retrieval_ndcg > 0 else 0.0
-        runs.append(
-            {
-                "seed": int(seed),
-                "retrieval_ndcg": retrieval_ndcg,
-                "ranking_ndcg": ranking_ndcg,
-                "lift_abs": float(lift_abs),
-                "lift_rel_pct": float(lift_rel_pct),
-                "use_ranker_score": bool(train_metrics.get("use_ranker_score", False)),
-                "guardrail": train_metrics.get("guardrail", {}),
-                "candidate_k_sweep": offline_metrics.get("candidate_k_sweep", {}),
-            }
-        )
+            train_metrics = _read_json(RANKING_DIR / "train_metrics.json")
+            offline_metrics = _read_json(EVAL_DIR / "offline_metrics.json")
+            retrieval_ndcg = float(offline_metrics["retrieval_order_ranking"].get(f"ndcg@{args.ranking_k}", 0.0))
+            ranking_ndcg = float(offline_metrics["ranking"].get(f"ndcg@{args.ranking_k}", 0.0))
+            lift_abs = ranking_ndcg - retrieval_ndcg
+            lift_rel_pct = (lift_abs / retrieval_ndcg * 100.0) if retrieval_ndcg > 0 else 0.0
+            test_lift = offline_metrics.get("test_lift", {})
+            test_lift_bootstrap = test_lift.get("bootstrap", {})
+            ci95_positive = bool(test_lift.get("ci95_positive", False))
+            guardrail = train_metrics.get("guardrail", {})
+            runs.append(
+                {
+                    "seed": int(seed),
+                    "retrieval_ndcg": retrieval_ndcg,
+                    "ranking_ndcg": ranking_ndcg,
+                    "lift_abs": float(lift_abs),
+                    "lift_rel_pct": float(lift_rel_pct),
+                    "use_ranker_score": bool(train_metrics.get("use_ranker_score", False)),
+                    "guardrail": guardrail,
+                    "test_lift_bootstrap": test_lift_bootstrap,
+                    "test_lift_ci95_positive": ci95_positive,
+                    "candidate_k_sweep": offline_metrics.get("candidate_k_sweep", {}),
+                }
+            )
 
     retrieval_vals = [float(r["retrieval_ndcg"]) for r in runs]
     ranking_vals = [float(r["ranking_ndcg"]) for r in runs]
+    lift_abs_vals = [float(r["lift_abs"]) for r in runs]
     lift_rel_vals = [float(r["lift_rel_pct"]) for r in runs]
     pass_rate = float(np.mean([1.0 if bool(r["use_ranker_score"]) else 0.0 for r in runs])) if runs else 0.0
+    positive_abs_count = int(sum(1 for r in runs if float(r["lift_abs"]) > 0.0))
+    positive_ci_count = 0
+    for r in runs:
+        if "test_lift_ci95_positive" in r:
+            if bool(r.get("test_lift_ci95_positive", False)):
+                positive_ci_count += 1
+        else:
+            guardrail = r.get("guardrail", {})
+            if float(guardrail.get("ci95_low", 0.0)) > 0.0:
+                positive_ci_count += 1
 
     candidate_keys = sorted({k for r in runs for k in r.get("candidate_k_sweep", {}).keys()}, key=lambda x: int(x))
     by_k: Dict[str, dict] = {}
@@ -235,8 +288,29 @@ def main() -> None:
         "aggregate": {
             "retrieval_ndcg": _summary_stats(retrieval_vals),
             "ranking_ndcg": _summary_stats(ranking_vals),
+            "abs_lift_ndcg": _summary_stats(lift_abs_vals),
+            "abs_lift_ndcg_mean_ci95": _bootstrap_mean_ci(
+                lift_abs_vals,
+                n_bootstrap=args.aggregate_bootstrap_samples,
+                random_state=args.aggregate_bootstrap_seed,
+            ),
             "relative_lift_pct": _summary_stats(lift_rel_vals),
+            "relative_lift_pct_mean_ci95": _bootstrap_mean_ci(
+                lift_rel_vals,
+                n_bootstrap=args.aggregate_bootstrap_samples,
+                random_state=args.aggregate_bootstrap_seed,
+            ),
             "guardrail_pass_rate": pass_rate,
+            "positive_abs_lift_seeds": {
+                "count": positive_abs_count,
+                "total": int(len(runs)),
+                "rate": float(positive_abs_count / len(runs)) if runs else 0.0,
+            },
+            "positive_ci95_lift_seeds": {
+                "count": positive_ci_count,
+                "total": int(len(runs)),
+                "rate": float(positive_ci_count / len(runs)) if runs else 0.0,
+            },
             "by_candidate_k": by_k,
         },
     }

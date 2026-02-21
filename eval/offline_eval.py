@@ -18,7 +18,12 @@ if str(ROOT_DIR) not in sys.path:
 from recsys.baselines import build_item_cf_neighbors, build_item_popularity, popularity_ranking
 from recsys.features import ItemFeatureStore, build_ranking_frame, build_user_context
 from recsys.io import load_all_splits, split_ground_truth, train_and_eval_histories
-from recsys.metrics import summarize_ranking_metrics, summarize_retrieval_metrics
+from recsys.metrics import (
+    bootstrap_lift_confidence,
+    per_user_ndcg_at_k,
+    summarize_ranking_metrics,
+    summarize_retrieval_metrics,
+)
 from recsys.paths import EVAL_DIR, PROCESSED_DATA_DIR, RANKING_DIR, RETRIEVAL_DIR, ensure_dirs
 from recsys.pipeline import context_timestamp_map, retrieve_candidates_for_users, retrieve_hybrid_candidates_for_users
 from recsys.ranking import load_ranker, predict_scores, ranking_dict_from_frame
@@ -42,6 +47,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rrf-k", type=int, default=60)
     parser.add_argument("--lgbm-baseline-rounds", type=int, default=150)
     parser.add_argument("--lgbm-baseline-leaves", type=int, default=31)
+    parser.add_argument("--lift-bootstrap-samples", type=int, default=1000)
+    parser.add_argument("--lift-bootstrap-seed", type=int, default=42)
     parser.add_argument("--drift-psi-threshold", type=float, default=0.25)
     parser.add_argument("--drift-kl-threshold", type=float, default=0.10)
     parser.add_argument("--latency-warmup", type=int, default=50, help="Number of initial requests to skip in latency stats")
@@ -372,6 +379,7 @@ def main() -> None:
 
     ranked_items = ranking_dict_from_frame(rank_test_df_main, score_col="final_score")
     ranking_metrics = summarize_ranking_metrics(ranked_items, test_truth, ks=[args.ranking_k])
+    retrieval_ranked_items = ranking_dict_from_frame(rank_test_df_main, score_col="retrieval_score")
 
     # Simple feature ablation: zero out retrieval_score and observe metric change.
     ablated_df = rank_test_df_main.copy()
@@ -385,6 +393,19 @@ def main() -> None:
     )
     ablated_ranked = ranking_dict_from_frame(ablated_df, score_col="final_score")
     ablation_metrics = summarize_ranking_metrics(ablated_ranked, test_truth, ks=[args.ranking_k])
+
+    retrieval_user_ndcg = per_user_ndcg_at_k(retrieval_ranked_items, test_truth, k=args.ranking_k)
+    ranking_user_ndcg = per_user_ndcg_at_k(ranked_items, test_truth, k=args.ranking_k)
+    lift_bootstrap = bootstrap_lift_confidence(
+        baseline_scores=retrieval_user_ndcg,
+        candidate_scores=ranking_user_ndcg,
+        n_bootstrap=args.lift_bootstrap_samples,
+        random_state=args.lift_bootstrap_seed,
+    )
+    retrieval_ndcg = float(retrieval_order_ranking_metrics.get(f"ndcg@{args.ranking_k}", 0.0))
+    ranking_ndcg = float(ranking_metrics.get(f"ndcg@{args.ranking_k}", 0.0))
+    abs_lift = float(ranking_ndcg - retrieval_ndcg)
+    rel_lift_pct = float((abs_lift / retrieval_ndcg * 100.0) if retrieval_ndcg > 0 else 0.0)
 
     # Candidate-size robustness sweep.
     k_sweep: Dict[str, dict] = {}
@@ -523,6 +544,13 @@ def main() -> None:
             "high_drift_features_val_test": high_drift_features,
             "guardrail_drift_warning": drift_warning,
             **drift,
+        },
+        "test_lift": {
+            "ranking_k": int(args.ranking_k),
+            "abs_ndcg_lift": abs_lift,
+            "relative_lift_pct": rel_lift_pct,
+            "bootstrap": lift_bootstrap,
+            "ci95_positive": bool(float(lift_bootstrap.get("ci95_low", 0.0)) > 0.0),
         },
         "latency": latency_metrics,
     }

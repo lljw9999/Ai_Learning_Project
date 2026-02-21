@@ -152,6 +152,8 @@ From `artifacts/eval/offline_metrics.json`:
 | Retrieval-order NDCG@10 (test) | 0.0293 |
 | Final Ranking NDCG@10 (test) | 0.0451 |
 | Final Ranking MAP@10 (test) | 0.0326 |
+| Absolute NDCG@10 Lift (test) | +0.0158 |
+| Lift 95% CI over users (bootstrap) | [0.0037, 0.0288] |
 | Latency p95 (ms, offline simulation, warmup-skipped) | ~55 (machine-load dependent) |
 | Ranker Guardrail (`use_ranker_score`) | true |
 
@@ -171,8 +173,16 @@ From `artifacts/eval/seed_sweep.json` (full end-to-end runs with retrieval + ran
 |---|---:|---:|
 | Retrieval-order NDCG@10 | 0.0332 | 0.0032 |
 | Final Ranking NDCG@10 | 0.0435 | 0.0013 |
+| Absolute NDCG@10 Lift | +0.0103 | 0.0033 |
 | Relative Lift (%) | 32.16 | 12.78 |
 | Guardrail Pass Rate | 1.00 | - |
+
+Seed-level lift checks:
+
+- Positive absolute lift seeds: `5/5`
+- Positive CI lower-bound seeds: `5/5` (CI lower bound > 0 from validation/bootstrap guardrail)
+- Mean absolute lift 95% CI (bootstrap over seeds): `[0.0073, 0.0134]`
+- Mean relative lift 95% CI (bootstrap over seeds): `[20.71, 44.64]`
 
 Candidate-size robustness (`ranking_k=10`):
 
@@ -275,6 +285,10 @@ This avoids future leakage and keeps evaluation aligned with realistic recommend
 - If `faiss-cpu` is unavailable, retrieval uses a Numpy fallback index.
 - The code is organized to make swapping datasets straightforward (`data/preprocess.py` is the integration point).
 - This project is a production-style **offline pipeline with serving + guardrails**, not a deployed online recommender with live A/B feedback loops.
+
+## Resume-Ready Line
+
+`Built a production-style two-stage recommender (two-tower + hybrid retrieval, LightGBM LTR reranker) with strict temporal leakage enforcement, drift reporting, bootstrap guardrails, and multi-seed/K-sweep robustness; achieved +32% mean relative NDCG@10 lift over retrieval-order across 5 seeds.`
 
 ## Tests
 
