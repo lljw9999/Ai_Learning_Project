@@ -26,6 +26,10 @@ flowchart LR
   E --> G["Offline Eval + Drift + Seed Sweep Reports"]
 ```
 
+## Why This Matters
+
+This system is built to answer a practical ranking-team question: can a reranker add measurable lift without cheating on time, leaking future data, or silently regressing in production. The stack combines fast retrieval, stronger reranking, and safety rails (leakage hard-fails, bootstrap guardrail, drift reporting) so gains are both measurable and defensible.
+
 ### Stage 1: Retrieval
 
 - Model: `recsys/retrieval.py::TwoTowerModel`
@@ -177,6 +181,16 @@ From `artifacts/eval/seed_sweep.json` (full end-to-end runs with retrieval + ran
 | Relative Lift (%) | 32.16 | 12.78 |
 | Guardrail Pass Rate | 1.00 | - |
 
+Results figure (mean relative lift by candidate size):
+
+```mermaid
+xychart-beta
+    title "Mean Relative NDCG@10 Lift (%) by Candidate K"
+    x-axis ["K=100", "K=200", "K=500"]
+    y-axis "Relative Lift (%)" 0 --> 60
+    bar [34.06, 32.16, 31.11]
+```
+
 Seed-level lift checks:
 
 - Positive absolute lift seeds: `5/5`
@@ -289,6 +303,8 @@ This avoids future leakage and keeps evaluation aligned with realistic recommend
 ## Resume-Ready Line
 
 `Built a production-style two-stage recommender (two-tower + hybrid retrieval, LightGBM LTR reranker) with strict temporal leakage enforcement, drift reporting, bootstrap guardrails, and multi-seed/K-sweep robustness; achieved +32% mean relative NDCG@10 lift over retrieval-order across 5 seeds.`
+
+Interview prep stories are in `/Users/yanzewu/Ai_Learning_Project/docs/interview_stories.md`.
 
 ## Tests
 
