@@ -231,6 +231,7 @@ def recommend(
             user_context=CTX.user_context,
             context_timestamps={user_idx: int(time.time())},
             ground_truth=None,
+            item_cf_neighbors=CTX.item_cf_neighbors if RETRIEVAL_MODE == "hybrid" else None,
         )
         if frame.empty:
             raise HTTPException(status_code=404, detail=f"No candidates found for user_id={user_id}")

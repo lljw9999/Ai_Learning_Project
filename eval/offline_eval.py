@@ -160,6 +160,7 @@ def main() -> None:
         user_context=user_context_test,
         context_timestamps=test_context_ts,
         ground_truth=test_truth,
+        item_cf_neighbors=item_cf_neighbors if args.retrieval_mode == "hybrid" else None,
     )
     if use_ranker_score:
         rank_test_df["rank_score"] = predict_scores(ranker, rank_test_df, feature_cols=feature_cols)
@@ -221,6 +222,7 @@ def main() -> None:
             user_context=user_context_test,
             context_timestamps={user: test_context_ts.get(user, 0)},
             ground_truth=None,
+            item_cf_neighbors=item_cf_neighbors if args.retrieval_mode == "hybrid" else None,
         )
         if use_ranker_score:
             frame_u["rank_score"] = predict_scores(ranker, frame_u, feature_cols=feature_cols)

@@ -18,14 +18,17 @@ class QueryExample:
     user_idx: int
     history_items: List[int]
     history_timestamps: List[int]
+    history_ratings: List[float]
     target_item: int
     target_timestamp: int
+    future_items: List[int]
 
 
 def build_train_queries(
     interactions: pd.DataFrame,
     min_history: int = 5,
     max_queries_per_user: int = 15,
+    future_positive_window: int = 10,
 ) -> List[QueryExample]:
     if interactions.empty:
         return []
@@ -38,6 +41,10 @@ def build_train_queries(
         user = int(user_idx)
         items = [int(v) for v in group["item_idx"].tolist()]
         timestamps = [int(v) for v in group["timestamp"].tolist()]
+        if "rating" in group.columns:
+            ratings = [float(v) for v in group["rating"].tolist()]
+        else:
+            ratings = [0.0 for _ in items]
 
         if len(items) <= min_history:
             continue
@@ -50,14 +57,23 @@ def build_train_queries(
         for pos in candidate_positions:
             history_items = items[:pos]
             history_timestamps = timestamps[:pos]
+            history_ratings = ratings[:pos]
+            future_start = pos + 1
+            if future_positive_window > 0:
+                future_end = min(len(items), future_start + int(future_positive_window))
+            else:
+                future_end = len(items)
+            future_items = items[future_start:future_end]
             queries.append(
                 QueryExample(
                     query_id=next_query_id,
                     user_idx=user,
                     history_items=history_items,
                     history_timestamps=history_timestamps,
+                    history_ratings=history_ratings,
                     target_item=items[pos],
                     target_timestamp=timestamps[pos],
+                    future_items=future_items,
                 )
             )
             next_query_id += 1
@@ -69,7 +85,7 @@ def _user_genre_profile(
     history_items: Sequence[int],
     history_timestamps: Sequence[int],
     item_main_genre: Mapping[int, str],
-) -> tuple[set[str], Dict[str, int]]:
+) -> tuple[set[str], Dict[str, int], Dict[str, int]]:
     genre_counts: Dict[str, int] = {}
     genre_last_ts: Dict[str, int] = {}
 
@@ -80,7 +96,7 @@ def _user_genre_profile(
 
     sorted_genres = sorted(genre_counts.items(), key=lambda x: (-x[1], x[0]))
     top_genres = {genre for genre, _ in sorted_genres[:3]}
-    return top_genres, genre_last_ts
+    return top_genres, genre_last_ts, genre_counts
 
 
 def _normalized_query(query_vector: np.ndarray) -> np.ndarray:
@@ -103,6 +119,26 @@ def _fuse_ranked_lists_rrf(
             score_map[int(item)] += float(weight / (rrf_k + rank))
     ranked = sorted(score_map.items(), key=lambda x: (-x[1], x[0]))[:top_k]
     return [int(item) for item, _ in ranked], [float(score) for _, score in ranked]
+
+
+def _cooccurrence_score_map(
+    history_items: Sequence[int],
+    item_cf_neighbors: Mapping[int, Sequence[Tuple[int, float]]] | None,
+    max_history_for_scoring: int = 30,
+) -> Dict[int, float]:
+    if item_cf_neighbors is None:
+        return {}
+    seen = set(int(i) for i in history_items)
+    scores: Dict[int, float] = {}
+    hist_tail = [int(i) for i in history_items[-max_history_for_scoring:]]
+    for pos, item in enumerate(reversed(hist_tail), start=1):
+        weight = 1.0 / np.log2(pos + 1)
+        for nbr, sim in item_cf_neighbors.get(item, []):
+            nbr_i = int(nbr)
+            if nbr_i in seen:
+                continue
+            scores[nbr_i] = scores.get(nbr_i, 0.0) + float(weight * sim)
+    return scores
 
 
 def build_ranker_training_frame(
@@ -173,16 +209,36 @@ def build_ranker_training_frame(
 
         user_activity = len(query.history_items)
         user_last_ts = int(query.history_timestamps[-1]) if query.history_timestamps else None
-        top_genres, genre_last_ts = _user_genre_profile(
+        top_genres, genre_last_ts, genre_counts = _user_genre_profile(
             history_items=query.history_items,
             history_timestamps=query.history_timestamps,
             item_main_genre=item_store.item_main_genre,
+        )
+        user_mean_rating = (
+            float(np.mean(query.history_ratings))
+            if query.history_ratings
+            else float(item_store.global_mean_rating)
+        )
+        future_positive_items = {int(i) for i in query.future_items}
+        cf_score_map = _cooccurrence_score_map(
+            history_items=query.history_items,
+            item_cf_neighbors=item_cf_neighbors,
+            max_history_for_scoring=30,
         )
 
         for rank_pos, (item_idx, retrieval_score) in enumerate(ranked_candidates, start=1):
             item = int(item_idx)
             genre = item_store.item_main_genre.get(item, "unknown")
             similar_last_ts = genre_last_ts.get(genre)
+            genre_count = genre_counts.get(genre, 0)
+            user_genre_affinity = float(genre_count / user_activity) if user_activity > 0 else 0.0
+            item_mean_rating = float(item_store.item_mean_rating.get(item, item_store.global_mean_rating))
+            item_first_ts = item_store.item_first_ts.get(item)
+            item_age_days = (
+                _safe_days(query.target_timestamp - item_first_ts)
+                if item_first_ts is not None
+                else 0.0
+            )
 
             if user_last_ts is None:
                 days_since_last = 999.0
@@ -193,6 +249,12 @@ def build_ranker_training_frame(
                 days_since_similar = 999.0
             else:
                 days_since_similar = _safe_days(query.target_timestamp - similar_last_ts)
+            if item == query.target_item:
+                label = 2
+            elif item in future_positive_items:
+                label = 1
+            else:
+                label = 0
 
             rows.append(
                 {
@@ -201,14 +263,21 @@ def build_ranker_training_frame(
                     "item_idx": int(item),
                     "retrieval_score": float(retrieval_score),
                     "retrieval_rank": float(rank_pos),
+                    "retrieval_recip_rank": float(1.0 / rank_pos),
                     "user_activity": float(user_activity),
                     "user_days_since_last": float(days_since_last),
+                    "user_genre_affinity": float(user_genre_affinity),
+                    "user_mean_rating": float(user_mean_rating),
                     "item_popularity": float(item_store.item_popularity.get(item, 0.0)),
                     "item_year_bucket": float(item_store.item_year_bucket.get(item, 0)),
                     "item_genre_id": float(item_store.genre_to_id.get(genre, 0)),
+                    "item_mean_rating": float(item_mean_rating),
+                    "item_age_days": float(item_age_days),
                     "category_match": float(1.0 if genre in top_genres else 0.0),
                     "days_since_similar": float(days_since_similar),
-                    "label": int(item == query.target_item),
+                    "cooccurrence_score": float(cf_score_map.get(item, 0.0)),
+                    "user_item_rating_delta": float(user_mean_rating - item_mean_rating),
+                    "label": int(label),
                 }
             )
 

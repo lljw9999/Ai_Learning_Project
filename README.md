@@ -32,14 +32,18 @@ A production-style recommender pipeline with:
 ### Stage 2: Ranking
 
 - Model: `lightgbm.LGBMRanker` (LambdaRank objective)
-- Train data: query-event samples from the train split (time-ordered histories), only when the next item is in retrieved candidates
+- Train data: query-event samples from the train split (time-ordered histories) with graded labels:
+  - `2`: immediate next item
+  - `1`: future positives in a short look-ahead window
+  - `0`: other retrieved candidates
 - Validation: early stopping on the validation split
 - Features:
-  - user: activity, days since last interaction
-  - item: popularity, year bucket, genre id
-  - interaction: category match, days since similar genre, retrieval score/rank
+  - retrieval: score, rank, reciprocal rank
+  - user: activity, recency, mean rating, genre affinity
+  - item: popularity, year bucket, genre id, mean rating, age
+  - interaction: category match, days since similar genre, item-CF co-occurrence score, user-item rating delta
 - Final serving score: `rank_score + alpha * retrieval_score` (if ranker is enabled)
-- Guardrail: if ranker does not beat retrieval-order by `min_ranker_improve` on validation, serving falls back to retrieval-order directly
+- Guardrail: ranker is enabled only if validation bootstrap confirms robust lift (`P(lift > 0)` and median lift threshold); otherwise serving falls back to retrieval-order
 - Output: robust ranked candidates with regression-safe fallback
 
 ## Repository Layout
@@ -80,7 +84,7 @@ python retrieval/build_index.py
 ### 4) Train ranking
 
 ```bash
-python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 200 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --min-ranker-improve 0.02
+python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 500 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --future-positive-window 10 --min-ranker-improve 0.005 --guardrail-confidence 0.95
 ```
 
 ### 5) Offline evaluation
@@ -107,6 +111,12 @@ Or demo client:
 python service/client.py --user-id 1 --n 10
 ```
 
+Ranker diagnostics (score distribution, score-label correlation, top-N before/after):
+
+```bash
+python ranking/debug_ranker.py --frame-path artifacts/ranking/ranker_val_frame.parquet --sample-users 5 --top-n 10
+```
+
 ## Current Offline Results (MovieLens Small, Time Split)
 
 From `artifacts/eval/offline_metrics.json`:
@@ -116,12 +126,12 @@ From `artifacts/eval/offline_metrics.json`:
 | Retrieval Recall@100 (test) | 0.3257 |
 | Retrieval Recall@200 (test) | 0.4359 |
 | Retrieval-order NDCG@10 (test) | 0.0356 |
-| Final Ranking NDCG@10 (test) | 0.0356 |
-| Final Ranking MAP@10 (test) | 0.0250 |
-| Latency p95 (ms, offline simulation, warmup-skipped) | ~71 (machine-load dependent) |
-| Ranker Guardrail (`use_ranker_score`) | false |
+| Final Ranking NDCG@10 (test) | 0.0402 |
+| Final Ranking MAP@10 (test) | 0.0285 |
+| Latency p95 (ms, offline simulation, warmup-skipped) | ~151 (machine-load dependent) |
+| Ranker Guardrail (`use_ranker_score`) | true |
 
-Current best configuration is hybrid retrieval with ranker guardrail fallback enabled; this avoids harmful reranking and keeps stronger retrieval ordering.
+Current best configuration is hybrid retrieval with a bootstrap-enabled ranker (`P(lift>0)=0.999`, median val lift `+0.0194` NDCG@10), which now clears guardrails and improves test ranking metrics.
 
 ## Baseline Benchmarks
 

@@ -6,13 +6,15 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from recsys.features import build_item_feature_store, build_ranking_frame, build_user_context, feature_columns
 from recsys.io import load_all_splits, load_items, split_ground_truth
-from recsys.metrics import summarize_ranking_metrics
+from recsys.metrics import bootstrap_lift_confidence, per_user_ndcg_at_k, summarize_ranking_metrics
 from recsys.paths import PROCESSED_DATA_DIR, RANKING_DIR, RETRIEVAL_DIR, ensure_dirs
 from recsys.baselines import build_item_cf_neighbors, build_item_popularity, popularity_ranking
 from recsys.pipeline import context_timestamp_map, retrieve_candidates_for_users, retrieve_hybrid_candidates_for_users
@@ -25,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train LightGBM ranker with query-level train events")
     parser.add_argument("--retrieval-mode", choices=["two_tower", "hybrid"], default="hybrid")
     parser.add_argument("--train-candidate-k", type=int, default=120, help="Retrieved candidates per train query")
-    parser.add_argument("--eval-candidate-k", type=int, default=200, help="Retrieved candidates per validation user")
+    parser.add_argument("--eval-candidate-k", type=int, default=500, help="Retrieved candidates per validation user")
     parser.add_argument("--itemcf-neighbors", type=int, default=200)
     parser.add_argument("--itemcf-min-pair", type=int, default=2)
     parser.add_argument("--two-tower-weight", type=float, default=1.0)
@@ -33,6 +35,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rrf-k", type=int, default=60)
     parser.add_argument("--min-history", type=int, default=5, help="Minimum history length to create a train query")
     parser.add_argument("--max-queries-per-user", type=int, default=15, help="Maximum train queries sampled per user")
+    parser.add_argument(
+        "--future-positive-window",
+        type=int,
+        default=10,
+        help="Future interaction window size used for graded labels (label=1)",
+    )
     parser.add_argument("--num-boost-round", type=int, default=500)
     parser.add_argument("--learning-rate", type=float, default=0.05)
     parser.add_argument("--num-leaves", type=int, default=63)
@@ -42,9 +50,27 @@ def parse_args() -> argparse.Namespace:
         "--min-ranker-improve",
         type=float,
         default=0.002,
-        help="Minimum val NDCG@10 lift over retrieval-order to enable ranker scores",
+        help="Minimum bootstrap median NDCG@10 lift over retrieval-order to enable ranker scores",
     )
-    parser.add_argument("--blend-grid", default="0.0,0.25,0.5,0.75,1.0,1.5,2.0", help="Comma-separated alpha grid for final_score = rank_score + alpha*retrieval_score")
+    parser.add_argument(
+        "--guardrail-confidence",
+        type=float,
+        default=0.95,
+        help="Required bootstrap confidence P(lift > 0) to enable ranker scores",
+    )
+    parser.add_argument(
+        "--guardrail-bootstrap-samples",
+        type=int,
+        default=1000,
+        help="Bootstrap iterations for ranker guardrail",
+    )
+    parser.add_argument("--guardrail-bootstrap-seed", type=int, default=42)
+    parser.add_argument("--debug-sample-users", type=int, default=5)
+    parser.add_argument(
+        "--blend-grid",
+        default="0.0,0.25,0.5,0.75,1.0,1.5,2.0",
+        help="Comma-separated alpha grid for final_score = rank_score + alpha*retrieval_score",
+    )
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
 
@@ -75,6 +101,7 @@ def main() -> None:
         interactions=train_df,
         min_history=args.min_history,
         max_queries_per_user=args.max_queries_per_user,
+        future_positive_window=args.future_positive_window,
     )
     if not train_queries:
         raise ValueError("No train queries generated. Reduce --min-history or review preprocessing.")
@@ -141,6 +168,7 @@ def main() -> None:
         user_context=user_context,
         context_timestamps=val_context_ts,
         ground_truth=val_truth,
+        item_cf_neighbors=item_cf_neighbors if args.retrieval_mode == "hybrid" else None,
     )
     val_pos = rank_val_df.groupby("user_idx")["label"].sum()
     val_positive_users = set(int(u) for u in val_pos[val_pos > 0].index.tolist())
@@ -161,6 +189,14 @@ def main() -> None:
     )
 
     rank_val_df["rank_score"] = predict_scores(model_ranker, rank_val_df, feature_cols=feat_cols)
+    score_vals = rank_val_df["rank_score"].to_numpy(dtype=np.float64)
+    label_vals = rank_val_df["label"].to_numpy(dtype=np.float64)
+    if score_vals.size > 0 and float(np.std(score_vals)) > 0 and float(np.std(label_vals)) > 0:
+        score_label_corr = float(np.corrcoef(score_vals, label_vals)[0, 1])
+    else:
+        score_label_corr = 0.0
+    per_user_score_std = rank_val_df.groupby("user_idx")["rank_score"].std(ddof=0).fillna(0.0)
+
     retrieval_only_metrics = summarize_ranking_metrics(
         ranking_dict_from_frame(rank_val_df, score_col="retrieval_score"),
         val_truth,
@@ -186,21 +222,41 @@ def main() -> None:
             best_val_ndcg = ndcg
             best_alpha = alpha
 
-    rank_val_df["final_score"] = rank_val_df["rank_score"] + best_alpha * rank_val_df["retrieval_score"]
+    rank_val_df["final_score_model"] = rank_val_df["rank_score"] + best_alpha * rank_val_df["retrieval_score"]
+    ranker_enabled_metrics = summarize_ranking_metrics(
+        ranking_dict_from_frame(rank_val_df, score_col="final_score_model"),
+        val_truth,
+        ks=[10],
+    )
+    retrieval_user_ndcg = per_user_ndcg_at_k(
+        ranking_dict_from_frame(rank_val_df, score_col="retrieval_score"),
+        val_truth,
+        k=10,
+    )
+    ranker_user_ndcg = per_user_ndcg_at_k(
+        ranking_dict_from_frame(rank_val_df, score_col="final_score_model"),
+        val_truth,
+        k=10,
+    )
+    bootstrap_guardrail = bootstrap_lift_confidence(
+        baseline_scores=retrieval_user_ndcg,
+        candidate_scores=ranker_user_ndcg,
+        n_bootstrap=args.guardrail_bootstrap_samples,
+        random_state=args.guardrail_bootstrap_seed,
+    )
+    use_ranker_score = bool(
+        float(bootstrap_guardrail.get("p_lift_gt_zero", 0.0)) >= float(args.guardrail_confidence)
+        and float(bootstrap_guardrail.get("median_lift", 0.0)) >= float(args.min_ranker_improve)
+    )
+    if not use_ranker_score:
+        rank_val_df["final_score"] = rank_val_df["retrieval_score"]
+    else:
+        rank_val_df["final_score"] = rank_val_df["final_score_model"]
     val_metrics = summarize_ranking_metrics(
         ranking_dict_from_frame(rank_val_df, score_col="final_score"),
         val_truth,
         ks=[10],
     )
-    use_ranker_score = True
-    if float(val_metrics.get("ndcg@10", 0.0)) < retrieval_only_ndcg + float(args.min_ranker_improve):
-        use_ranker_score = False
-        rank_val_df["final_score"] = rank_val_df["retrieval_score"]
-        val_metrics = summarize_ranking_metrics(
-            ranking_dict_from_frame(rank_val_df, score_col="final_score"),
-            val_truth,
-            ks=[10],
-        )
 
     save_ranker(
         model_ranker,
@@ -211,6 +267,47 @@ def main() -> None:
     )
     rank_train_df.to_parquet(RANKING_DIR / "ranker_train_frame.parquet", index=False)
     rank_val_df.to_parquet(RANKING_DIR / "ranker_val_frame.parquet", index=False)
+    sample_users = sorted(val_positive_users)[: max(int(args.debug_sample_users), 0)]
+    top10_examples = []
+    for user in sample_users:
+        frame_u = rank_val_df.loc[rank_val_df["user_idx"] == int(user)].copy()
+        retrieval_top = frame_u.sort_values("retrieval_score", ascending=False).head(10)
+        model_top = frame_u.sort_values("final_score_model", ascending=False).head(10)
+        served_top = frame_u.sort_values("final_score", ascending=False).head(10)
+        top10_examples.append(
+            {
+                "user_idx": int(user),
+                "retrieval_top10": [
+                    {"item_idx": int(r.item_idx), "score": float(r.retrieval_score), "label": int(r.label)}
+                    for r in retrieval_top.itertuples(index=False)
+                ],
+                "ranker_top10": [
+                    {"item_idx": int(r.item_idx), "score": float(r.final_score_model), "label": int(r.label)}
+                    for r in model_top.itertuples(index=False)
+                ],
+                "served_top10": [
+                    {"item_idx": int(r.item_idx), "score": float(r.final_score), "label": int(r.label)}
+                    for r in served_top.itertuples(index=False)
+                ],
+            }
+        )
+    debug_report = {
+        "score_distribution": {
+            "min": float(np.min(score_vals)) if score_vals.size > 0 else 0.0,
+            "mean": float(np.mean(score_vals)) if score_vals.size > 0 else 0.0,
+            "max": float(np.max(score_vals)) if score_vals.size > 0 else 0.0,
+            "std": float(np.std(score_vals)) if score_vals.size > 0 else 0.0,
+        },
+        "per_user_score_std": {
+            "mean": float(per_user_score_std.mean()) if len(per_user_score_std) > 0 else 0.0,
+            "median": float(per_user_score_std.median()) if len(per_user_score_std) > 0 else 0.0,
+            "min": float(per_user_score_std.min()) if len(per_user_score_std) > 0 else 0.0,
+            "max": float(per_user_score_std.max()) if len(per_user_score_std) > 0 else 0.0,
+        },
+        "score_label_corr": float(score_label_corr),
+        "top10_examples": top10_examples,
+    }
+    (RANKING_DIR / "ranker_debug_report.json").write_text(json.dumps(debug_report, indent=2))
 
     summary = {
         "num_train_queries": int(rank_train_df["query_id"].nunique()),
@@ -224,7 +321,20 @@ def main() -> None:
         "score_blend_alpha": float(best_alpha),
         "use_ranker_score": bool(use_ranker_score),
         "val_retrieval_order_ndcg@10": retrieval_only_ndcg,
+        "val_ranker_enabled_ndcg@10": float(ranker_enabled_metrics.get("ndcg@10", 0.0)),
         "val_users_with_retrieved_positive": int(len(val_positive_users)),
+        "guardrail": {
+            "p_lift_gt_zero_threshold": float(args.guardrail_confidence),
+            "median_lift_threshold": float(args.min_ranker_improve),
+            **bootstrap_guardrail,
+        },
+        "train_label_distribution": {
+            str(int(k)): int(v) for k, v in rank_train_df["label"].value_counts().sort_index().items()
+        },
+        "score_diagnostics": {
+            "score_label_corr": float(score_label_corr),
+            "score_std": float(np.std(score_vals)) if score_vals.size > 0 else 0.0,
+        },
         **{f"val_{k}": float(v) for k, v in val_metrics.items()},
     }
     (RANKING_DIR / "train_metrics.json").write_text(json.dumps(summary, indent=2))

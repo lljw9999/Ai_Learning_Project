@@ -69,6 +69,7 @@ def main() -> None:
     index = CandidateIndex.load(RETRIEVAL_DIR / "candidate_index")
 
     user_histories = build_user_history(history_df)
+    item_cf_neighbors = None
     if args.retrieval_mode == "hybrid":
         popularity = build_item_popularity(train_df)
         global_pop = popularity_ranking(popularity)
@@ -112,6 +113,7 @@ def main() -> None:
         user_context=user_context,
         context_timestamps=context_ts,
         ground_truth=None,
+        item_cf_neighbors=item_cf_neighbors,
     )
 
     ranker, feature_cols, score_blend_alpha, use_ranker_score = load_ranker(RANKING_DIR / "lightgbm_ranker")
