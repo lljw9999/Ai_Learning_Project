@@ -17,7 +17,7 @@ retrieval:
 	$(PYTHON) retrieval/build_index.py
 
 ranking:
-	$(PYTHON) ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 200 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --min-ranker-improve 0.015
+	$(PYTHON) ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 200 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --min-ranker-improve 0.02
 
 eval:
 	$(PYTHON) eval/offline_eval.py --retrieval-mode hybrid

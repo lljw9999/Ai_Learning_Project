@@ -80,7 +80,7 @@ python retrieval/build_index.py
 ### 4) Train ranking
 
 ```bash
-python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 200 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --min-ranker-improve 0.015
+python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 200 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --min-ranker-improve 0.02
 ```
 
 ### 5) Offline evaluation
@@ -118,7 +118,7 @@ From `artifacts/eval/offline_metrics.json`:
 | Retrieval-order NDCG@10 (test) | 0.0356 |
 | Final Ranking NDCG@10 (test) | 0.0356 |
 | Final Ranking MAP@10 (test) | 0.0250 |
-| Latency p95 (ms, offline simulation, warmup-skipped) | 50.31 |
+| Latency p95 (ms, offline simulation, warmup-skipped) | ~71 (machine-load dependent) |
 | Ranker Guardrail (`use_ranker_score`) | false |
 
 Current best configuration is hybrid retrieval with ranker guardrail fallback enabled; this avoids harmful reranking and keeps stronger retrieval ordering.
