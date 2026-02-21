@@ -3,7 +3,7 @@
 [![CI](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/ci.yml/badge.svg)](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/ci.yml)
 [![Docker Image](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/docker-image.yml/badge.svg)](https://github.com/lljw9999/Ai_Learning_Project/actions/workflows/docker-image.yml)
 
-A production-style recommender pipeline with:
+A production-style **offline** recommender pipeline with:
 
 1. Time-based data split (leave-two-out per user)
 2. Stage 1 retrieval (Two-Tower embedding model + Item-CF hybrid + FAISS/Numpy ANN index)
@@ -15,6 +15,16 @@ A production-style recommender pipeline with:
 ## Architecture
 
 `User history + item metadata -> Hybrid Retrieval top-K -> Feature generation -> LightGBM ranking (guarded) -> Top-N API response`
+
+```mermaid
+flowchart LR
+  A["User History + Item Metadata"] --> B["Stage 1 Retrieval (Two-Tower + Item-CF)"]
+  B --> C["ANN Candidate Set (K=100-500)"]
+  C --> D["Stage 2 Ranking (LightGBM)"]
+  D --> E["Bootstrap Guardrail"]
+  E --> F["FastAPI /recommend Top-N Response"]
+  E --> G["Offline Eval + Drift + Seed Sweep Reports"]
+```
 
 ### Stage 1: Retrieval
 
@@ -59,6 +69,14 @@ A production-style recommender pipeline with:
 
 ## Quickstart
 
+### One-command run (sanity)
+
+```bash
+make smoke
+```
+
+This runs data prep, lightweight retrieval/ranking training, offline eval, and writes artifacts.
+
 ### 1) Install dependencies
 
 ```bash
@@ -84,13 +102,13 @@ python retrieval/build_index.py
 ### 4) Train ranking
 
 ```bash
-python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 500 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --future-positive-window 10 --min-ranker-improve 0.005 --guardrail-confidence 0.95
+python ranking/train.py --retrieval-mode hybrid --train-candidate-k 120 --eval-candidate-k 500 --num-boost-round 600 --learning-rate 0.04 --num-leaves 127 --early-stopping-rounds 80 --n-jobs 1 --seed 42 --future-positive-window 10 --min-ranker-improve 0.005 --guardrail-confidence 0.95
 ```
 
 ### 5) Offline evaluation
 
 ```bash
-python eval/offline_eval.py --retrieval-mode hybrid --retrieval-k 200 --ranking-k 10
+python eval/offline_eval.py --retrieval-mode hybrid --retrieval-k 200 --ranking-k 10 --candidate-k-grid 100,200,500
 ```
 
 ### 6) Serve API
@@ -117,21 +135,66 @@ Ranker diagnostics (score distribution, score-label correlation, top-N before/af
 python ranking/debug_ranker.py --frame-path artifacts/ranking/ranker_val_frame.parquet --sample-users 5 --top-n 10
 ```
 
-## Current Offline Results (MovieLens Small, Time Split)
+5-seed reproducibility sweep:
+
+```bash
+python eval/seed_sweep.py --seeds 11,22,33,44,55 --retrieval-mode hybrid --retrieval-k 200 --ranking-k 10 --candidate-k-grid 100,200,500
+```
+
+## Latest Single-Run Results (MovieLens Small, Time Split)
 
 From `artifacts/eval/offline_metrics.json`:
 
 | Metric | Value |
 |---|---:|
-| Retrieval Recall@100 (test) | 0.3257 |
-| Retrieval Recall@200 (test) | 0.4359 |
-| Retrieval-order NDCG@10 (test) | 0.0356 |
-| Final Ranking NDCG@10 (test) | 0.0402 |
-| Final Ranking MAP@10 (test) | 0.0285 |
-| Latency p95 (ms, offline simulation, warmup-skipped) | ~151 (machine-load dependent) |
+| Retrieval Recall@100 (test) | 0.3207 |
+| Retrieval Recall@200 (test) | 0.4391 |
+| Retrieval-order NDCG@10 (test) | 0.0293 |
+| Final Ranking NDCG@10 (test) | 0.0451 |
+| Final Ranking MAP@10 (test) | 0.0326 |
+| Latency p95 (ms, offline simulation, warmup-skipped) | ~55 (machine-load dependent) |
 | Ranker Guardrail (`use_ranker_score`) | true |
 
-Current best configuration is hybrid retrieval with a bootstrap-enabled ranker (`P(lift>0)=0.999`, median val lift `+0.0194` NDCG@10), which now clears guardrails and improves test ranking metrics.
+Also from this run (`artifacts/eval/offline_metrics.json`), fair reranker baselines on the same frame:
+
+| Reranker | NDCG@10 (test) |
+|---|---:|
+| LightGBM full model | 0.0451 |
+| Logistic regression (same features) | 0.0288 |
+| LightGBM (`retrieval_score` only) | 0.0267 |
+
+## Reproducibility (5 Seeds)
+
+From `artifacts/eval/seed_sweep.json` (full end-to-end runs with retrieval + ranking + eval):
+
+| Metric | Mean | Std |
+|---|---:|---:|
+| Retrieval-order NDCG@10 | 0.0332 | 0.0032 |
+| Final Ranking NDCG@10 | 0.0435 | 0.0013 |
+| Relative Lift (%) | 32.16 | 12.78 |
+| Guardrail Pass Rate | 1.00 | - |
+
+Candidate-size robustness (`ranking_k=10`):
+
+| Candidate K | Retrieval NDCG@10 (mean) | Ranking NDCG@10 (mean) | Relative Lift % (mean) |
+|---|---:|---:|---:|
+| 100 | 0.0332 | 0.0441 | 34.06 |
+| 200 | 0.0332 | 0.0435 | 32.16 |
+| 500 | 0.0332 | 0.0432 | 31.11 |
+
+## Guardrail Logic
+
+The ranker is enabled only if both conditions hold on validation:
+
+1. `P(lift > 0) >= guardrail_confidence` from bootstrap over users
+2. `median_lift >= min_ranker_improve`
+
+Current default command-level thresholds:
+
+- `guardrail_confidence = 0.95`
+- `min_ranker_improve = 0.005` (NDCG@10 absolute)
+
+Leakage checks are enforced in training (`recsys/ranker_dataset.py`) and fail hard on temporal violations; counts are logged in `artifacts/ranking/train_metrics.json`.
 
 ## Baseline Benchmarks
 
@@ -173,6 +236,12 @@ python eval/daily_report.py --retrieval-mode hybrid --retrieval-k 200 --ranking-
   - `item_popularity`
   - `retrieval_score`
 
+`eval/offline_eval.py` additionally writes:
+
+- candidate-size robustness curves (`candidate_k_sweep`)
+- reranker baseline comparisons
+- train/val/test drift report (PSI + KL) with warning if guardrail passes under high drift
+
 ## Time-Split Evaluation Design
 
 The preprocessing split is per-user, timestamp ordered:
@@ -191,6 +260,7 @@ This avoids future leakage and keeps evaluation aligned with realistic recommend
 - Popularity bias
 - Concept/time drift
 - Feedback loops from exposure bias
+- Offline metric optimism without exposure/impression logs
 
 ### Production upgrades
 
@@ -204,6 +274,7 @@ This avoids future leakage and keeps evaluation aligned with realistic recommend
 
 - If `faiss-cpu` is unavailable, retrieval uses a Numpy fallback index.
 - The code is organized to make swapping datasets straightforward (`data/preprocess.py` is the integration point).
+- This project is a production-style **offline pipeline with serving + guardrails**, not a deployed online recommender with live A/B feedback loops.
 
 ## Tests
 

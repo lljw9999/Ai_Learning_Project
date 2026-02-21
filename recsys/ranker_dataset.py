@@ -22,6 +22,29 @@ class QueryExample:
     target_item: int
     target_timestamp: int
     future_items: List[int]
+    future_timestamps: List[int]
+
+
+@dataclass
+class LeakageCheckResult:
+    num_queries: int
+    history_not_before_target: int
+    future_not_after_target: int
+    target_crosses_val_boundary: int
+    future_crosses_val_boundary: int
+    target_crosses_test_boundary: int
+    future_crosses_test_boundary: int
+
+    @property
+    def total_violations(self) -> int:
+        return (
+            self.history_not_before_target
+            + self.future_not_after_target
+            + self.target_crosses_val_boundary
+            + self.future_crosses_val_boundary
+            + self.target_crosses_test_boundary
+            + self.future_crosses_test_boundary
+        )
 
 
 def build_train_queries(
@@ -64,6 +87,7 @@ def build_train_queries(
             else:
                 future_end = len(items)
             future_items = items[future_start:future_end]
+            future_timestamps = timestamps[future_start:future_end]
             queries.append(
                 QueryExample(
                     query_id=next_query_id,
@@ -74,11 +98,86 @@ def build_train_queries(
                     target_item=items[pos],
                     target_timestamp=timestamps[pos],
                     future_items=future_items,
+                    future_timestamps=future_timestamps,
                 )
             )
             next_query_id += 1
 
     return queries
+
+
+def validate_query_leakage(
+    queries: Sequence[QueryExample],
+    val_interactions: pd.DataFrame | None = None,
+    test_interactions: pd.DataFrame | None = None,
+    strict: bool = True,
+) -> LeakageCheckResult:
+    val_min_ts: Dict[int, int] = {}
+    test_min_ts: Dict[int, int] = {}
+    if val_interactions is not None and not val_interactions.empty:
+        grouped_val = val_interactions.groupby("user_idx")["timestamp"].min()
+        val_min_ts = {int(u): int(ts) for u, ts in grouped_val.items()}
+    if test_interactions is not None and not test_interactions.empty:
+        grouped_test = test_interactions.groupby("user_idx")["timestamp"].min()
+        test_min_ts = {int(u): int(ts) for u, ts in grouped_test.items()}
+
+    history_not_before_target = 0
+    future_not_after_target = 0
+    target_crosses_val_boundary = 0
+    future_crosses_val_boundary = 0
+    target_crosses_test_boundary = 0
+    future_crosses_test_boundary = 0
+
+    for query in queries:
+        target_ts = int(query.target_timestamp)
+        # Equal timestamps are allowed because MovieLens can contain same-second events.
+        # Temporal order is still preserved by sequence position.
+        if query.history_timestamps and max(int(ts) for ts in query.history_timestamps) > target_ts:
+            history_not_before_target += 1
+        if any(int(ts) < target_ts for ts in query.future_timestamps):
+            future_not_after_target += 1
+
+        user = int(query.user_idx)
+        val_boundary = val_min_ts.get(user)
+        if val_boundary is not None:
+            if target_ts > int(val_boundary):
+                target_crosses_val_boundary += 1
+            if any(int(ts) > int(val_boundary) for ts in query.future_timestamps):
+                future_crosses_val_boundary += 1
+
+        test_boundary = test_min_ts.get(user)
+        if test_boundary is not None:
+            if target_ts > int(test_boundary):
+                target_crosses_test_boundary += 1
+            if any(int(ts) > int(test_boundary) for ts in query.future_timestamps):
+                future_crosses_test_boundary += 1
+
+    result = LeakageCheckResult(
+        num_queries=int(len(queries)),
+        history_not_before_target=int(history_not_before_target),
+        future_not_after_target=int(future_not_after_target),
+        target_crosses_val_boundary=int(target_crosses_val_boundary),
+        future_crosses_val_boundary=int(future_crosses_val_boundary),
+        target_crosses_test_boundary=int(target_crosses_test_boundary),
+        future_crosses_test_boundary=int(future_crosses_test_boundary),
+    )
+    print(
+        "[ranker_dataset] leakage_check "
+        f"queries={result.num_queries} "
+        f"violations={result.total_violations} "
+        f"history_not_before_target={result.history_not_before_target} "
+        f"future_not_after_target={result.future_not_after_target} "
+        f"target_crosses_val={result.target_crosses_val_boundary} "
+        f"future_crosses_val={result.future_crosses_val_boundary} "
+        f"target_crosses_test={result.target_crosses_test_boundary} "
+        f"future_crosses_test={result.future_crosses_test_boundary}"
+    )
+    if strict and result.total_violations > 0:
+        raise ValueError(
+            "Detected temporal leakage in ranker query construction. "
+            f"Violations: {result.total_violations}"
+        )
+    return result
 
 
 def _user_genre_profile(

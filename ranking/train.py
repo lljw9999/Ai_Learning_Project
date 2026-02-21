@@ -18,7 +18,7 @@ from recsys.metrics import bootstrap_lift_confidence, per_user_ndcg_at_k, summar
 from recsys.paths import PROCESSED_DATA_DIR, RANKING_DIR, RETRIEVAL_DIR, ensure_dirs
 from recsys.baselines import build_item_cf_neighbors, build_item_popularity, popularity_ranking
 from recsys.pipeline import context_timestamp_map, retrieve_candidates_for_users, retrieve_hybrid_candidates_for_users
-from recsys.ranker_dataset import build_ranker_training_frame, build_train_queries
+from recsys.ranker_dataset import build_ranker_training_frame, build_train_queries, validate_query_leakage
 from recsys.ranking import predict_scores, ranking_dict_from_frame, save_ranker, train_ranker
 from recsys.retrieval import CandidateIndex, build_user_history, load_two_tower_model
 
@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-leaves", type=int, default=63)
     parser.add_argument("--early-stopping-rounds", type=int, default=50)
     parser.add_argument("--n-jobs", type=int, default=1, help="LightGBM threads")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for ranker training")
     parser.add_argument(
         "--min-ranker-improve",
         type=float,
@@ -64,7 +65,7 @@ def parse_args() -> argparse.Namespace:
         default=1000,
         help="Bootstrap iterations for ranker guardrail",
     )
-    parser.add_argument("--guardrail-bootstrap-seed", type=int, default=42)
+    parser.add_argument("--guardrail-bootstrap-seed", type=int, default=None)
     parser.add_argument("--debug-sample-users", type=int, default=5)
     parser.add_argument(
         "--blend-grid",
@@ -82,6 +83,7 @@ def main() -> None:
     splits = load_all_splits(data_dir=PROCESSED_DATA_DIR)
     train_df = splits["train"]
     val_df = splits["val"]
+    test_df = splits["test"]
     items_df = load_items(data_dir=PROCESSED_DATA_DIR)
 
     model, model_meta = load_two_tower_model(RETRIEVAL_DIR / "two_tower_model", device=args.device)
@@ -105,6 +107,12 @@ def main() -> None:
     )
     if not train_queries:
         raise ValueError("No train queries generated. Reduce --min-history or review preprocessing.")
+    leakage_report = validate_query_leakage(
+        train_queries,
+        val_interactions=val_df,
+        test_interactions=test_df,
+        strict=True,
+    )
 
     rank_train_df = build_ranker_training_frame(
         queries=train_queries,
@@ -186,6 +194,7 @@ def main() -> None:
         num_leaves=args.num_leaves,
         early_stopping_rounds=args.early_stopping_rounds,
         n_jobs=args.n_jobs,
+        random_state=args.seed,
     )
 
     rank_val_df["rank_score"] = predict_scores(model_ranker, rank_val_df, feature_cols=feat_cols)
@@ -242,7 +251,11 @@ def main() -> None:
         baseline_scores=retrieval_user_ndcg,
         candidate_scores=ranker_user_ndcg,
         n_bootstrap=args.guardrail_bootstrap_samples,
-        random_state=args.guardrail_bootstrap_seed,
+        random_state=(
+            int(args.guardrail_bootstrap_seed)
+            if args.guardrail_bootstrap_seed is not None
+            else int(args.seed)
+        ),
     )
     use_ranker_score = bool(
         float(bootstrap_guardrail.get("p_lift_gt_zero", 0.0)) >= float(args.guardrail_confidence)
@@ -317,15 +330,31 @@ def main() -> None:
         "retrieval_mode": args.retrieval_mode,
         "train_candidate_k": args.train_candidate_k,
         "eval_candidate_k": args.eval_candidate_k,
+        "seed": int(args.seed),
         "best_iteration": int(getattr(model_ranker, "best_iteration_", 0) or 0),
         "score_blend_alpha": float(best_alpha),
         "use_ranker_score": bool(use_ranker_score),
         "val_retrieval_order_ndcg@10": retrieval_only_ndcg,
         "val_ranker_enabled_ndcg@10": float(ranker_enabled_metrics.get("ndcg@10", 0.0)),
         "val_users_with_retrieved_positive": int(len(val_positive_users)),
+        "leakage_check": {
+            "num_queries": int(leakage_report.num_queries),
+            "total_violations": int(leakage_report.total_violations),
+            "history_not_before_target": int(leakage_report.history_not_before_target),
+            "future_not_after_target": int(leakage_report.future_not_after_target),
+            "target_crosses_val_boundary": int(leakage_report.target_crosses_val_boundary),
+            "future_crosses_val_boundary": int(leakage_report.future_crosses_val_boundary),
+            "target_crosses_test_boundary": int(leakage_report.target_crosses_test_boundary),
+            "future_crosses_test_boundary": int(leakage_report.future_crosses_test_boundary),
+        },
         "guardrail": {
             "p_lift_gt_zero_threshold": float(args.guardrail_confidence),
             "median_lift_threshold": float(args.min_ranker_improve),
+            "bootstrap_seed": (
+                int(args.guardrail_bootstrap_seed)
+                if args.guardrail_bootstrap_seed is not None
+                else int(args.seed)
+            ),
             **bootstrap_guardrail,
         },
         "train_label_distribution": {
