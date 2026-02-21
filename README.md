@@ -66,7 +66,7 @@ This system is built to answer a practical ranking-team question: can a reranker
 - `retrieval/` two-tower training, index build, retrieval CLI
 - `ranking/` ranker training + inference CLI
 - `eval/` offline metrics + daily drift report
-- `service/` FastAPI app + demo client
+- `service/` FastAPI app + static demo console + demo client
 - `recsys/` shared library code
 - `artifacts/` model/data/eval outputs (generated)
 - `logs/` service and daily metric logs (generated)
@@ -132,6 +132,19 @@ Or demo client:
 ```bash
 python service/client.py --user-id 1 --n 10
 ```
+
+### 7) Recsys Demo Console (Interactive UI)
+
+The service now ships a one-page frontend:
+
+- Name: `Recsys Demo Console: interactive UI for retrieval vs reranking, guardrail decisions, and latency telemetry.`
+- URL: `http://127.0.0.1:8000/`
+- Layout: input panel (left), results (center), observability tabs (right)
+- Uses:
+  - `GET /health` (10s status polling)
+  - `GET /api/users`
+  - `GET /api/telemetry`
+  - `GET /recommend`
 
 Ranker diagnostics (score distribution, score-label correlation, top-N before/after):
 

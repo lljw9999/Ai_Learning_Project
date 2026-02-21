@@ -1,0 +1,1082 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ai_Learning_Project Recommender Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-top: #f4f8fb;
+      --bg-mid: #e9f1f6;
+      --bg-low: #fefefe;
+      --text: #1b2a37;
+      --muted: #5e7387;
+      --border: #d4e1ec;
+      --accent: #006a9b;
+      --accent-soft: #e2f4ff;
+      --ok: #167f56;
+      --ok-bg: #e7f7f0;
+      --down: #9f2935;
+      --down-bg: #fbe8ea;
+      --warn: #9a5e00;
+      --warn-bg: #fff3df;
+      --card: rgba(255, 255, 255, 0.88);
+      --shadow: 0 10px 28px rgba(18, 43, 66, 0.1);
+      --radius: 14px;
+      --radius-sm: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      font-family: "Sora", "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 0% 0%, #d9edf8 0%, transparent 33%),
+        radial-gradient(circle at 100% 100%, #e8efe3 0%, transparent 34%),
+        linear-gradient(180deg, var(--bg-top), var(--bg-mid) 30%, var(--bg-low));
+    }
+
+    .page {
+      max-width: 1560px;
+      margin: 0 auto;
+      padding: 18px 20px 24px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 16px 18px;
+      background: var(--card);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0.2px;
+      font-weight: 700;
+    }
+
+    .status-pill {
+      font-size: 12px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .status-pill.ok {
+      color: var(--ok);
+      background: var(--ok-bg);
+      border-color: #c7ebdc;
+    }
+
+    .status-pill.down {
+      color: var(--down);
+      background: var(--down-bg);
+      border-color: #f0c5ca;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      max-width: 960px;
+    }
+
+    .chip {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--card);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+      min-height: 220px;
+    }
+
+    .panel h2 {
+      margin: 2px 0 12px;
+      font-size: 14px;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #375066;
+    }
+
+    .subtext {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .control {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    label {
+      font-size: 12px;
+      color: #3f5568;
+      font-weight: 600;
+    }
+
+    input[type="number"],
+    select {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      color: var(--text);
+      padding: 9px 10px;
+      font-size: 14px;
+      font-family: inherit;
+      width: 100%;
+    }
+
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+    }
+
+    .toggle-row span {
+      font-size: 13px;
+      color: #32485c;
+    }
+
+    .toggle-note {
+      margin-top: -3px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0d79a9, #045f85);
+      color: #fff;
+    }
+
+    .btn-secondary {
+      border-color: var(--border);
+      background: #fff;
+      color: var(--text);
+    }
+
+    .btn-tertiary {
+      grid-column: 1 / span 2;
+      border-color: #c8d9e7;
+      background: #eff8fd;
+      color: #0d587b;
+    }
+
+    .state-banner {
+      margin-top: 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 9px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .state-banner.warn {
+      border-color: #f0d7a9;
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+
+    .state-banner.error {
+      border-color: #efc3c8;
+      background: #fef1f3;
+      color: var(--down);
+    }
+
+    .results-wrap {
+      display: grid;
+      gap: 10px;
+      min-height: 540px;
+    }
+
+    .result-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #fff;
+      padding: 12px 12px 10px;
+    }
+
+    .result-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .rank-badge {
+      min-width: 30px;
+      text-align: center;
+      background: var(--accent-soft);
+      color: #03597f;
+      border: 1px solid #bde6fa;
+      border-radius: 8px;
+      padding: 4px 6px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .item-title {
+      margin: 0 0 6px;
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.32;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .tag {
+      font-size: 11px;
+      color: #365168;
+      border: 1px solid #d4e2ee;
+      background: #f7fbfe;
+      border-radius: 999px;
+      padding: 3px 7px;
+    }
+
+    .metric-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 12px;
+      color: #4c6479;
+    }
+
+    .metric-line code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: #173047;
+      background: #f4f9fd;
+      border: 1px solid #ddebf7;
+      border-radius: 6px;
+      padding: 2px 5px;
+    }
+
+    details {
+      margin-top: 10px;
+      border: 1px dashed #c9dceb;
+      border-radius: 9px;
+      padding: 8px 9px;
+      background: #fbfdff;
+    }
+
+    summary {
+      font-size: 12px;
+      font-weight: 600;
+      color: #27465f;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .exp-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      font-size: 11px;
+      color: #465f74;
+    }
+
+    .feature-top {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .feature-chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      border-radius: 6px;
+      border: 1px solid #d4e2ef;
+      background: #fff;
+      padding: 3px 6px;
+      color: #2f4b62;
+    }
+
+    .skeleton {
+      border-radius: var(--radius-sm);
+      height: 110px;
+      border: 1px solid var(--border);
+      background: linear-gradient(90deg, #eff5fa 0%, #f8fbfe 50%, #eff5fa 100%);
+      background-size: 200% 100%;
+      animation: pulse 1.15s linear infinite;
+    }
+
+    @keyframes pulse {
+      to {
+        background-position: -200% 0;
+      }
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .tab-btn {
+      border: 1px solid var(--border);
+      background: #fff;
+      color: #365169;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .tab-btn.active {
+      background: #dff1fb;
+      border-color: #a9d9f0;
+      color: #0b4f74;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    pre {
+      margin: 0;
+      font-size: 11px;
+      line-height: 1.5;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      background: #0f1822;
+      color: #d7e3ee;
+      border-radius: var(--radius-sm);
+      padding: 11px;
+      min-height: 210px;
+      max-height: 455px;
+      overflow: auto;
+    }
+
+    .metric-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .metric-table td {
+      border-bottom: 1px solid #e4edf5;
+      padding: 8px 4px;
+      vertical-align: top;
+    }
+
+    .metric-table td:first-child {
+      color: #4f667a;
+      width: 48%;
+    }
+
+    .metric-table td:last-child {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      color: #153047;
+    }
+
+    .foot {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #5d7386;
+    }
+
+    @media (max-width: 1240px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        min-height: auto;
+      }
+
+      .chip-row {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        flex-direction: column;
+      }
+
+      .brand h1 {
+        font-size: 18px;
+      }
+
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .btn-tertiary {
+        grid-column: 1;
+      }
+
+      .exp-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Ai_Learning_Project Recommender</h1>
+        <span id="apiStatus" class="status-pill down">API: DOWN</span>
+      </div>
+      <div class="chip-row">
+        <span id="modelChip" class="chip">Model: hybrid+ltr</span>
+        <span id="candidateChip" class="chip">Candidate K: 200</span>
+        <span id="rankerChip" class="chip">Ranker: enabled</span>
+        <span id="latencyChip" class="chip">p95 latency: -- ms</span>
+        <span id="liftChip" class="chip">Last eval lift: --</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel" aria-label="Input Panel">
+        <h2>Section A · Input Panel</h2>
+        <p class="subtext">Pick a user/session, set retrieval and ranking mode, then run a request.</p>
+
+        <div class="control">
+          <label for="userSelect">User selector</label>
+          <select id="userSelect"></select>
+        </div>
+
+        <div class="control">
+          <label for="userIdFallback">Manual user_id (optional)</label>
+          <input id="userIdFallback" type="number" placeholder="Uses dropdown if empty" min="1" />
+        </div>
+
+        <div class="control">
+          <label for="topN">Top-N</label>
+          <select id="topN">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+          </select>
+        </div>
+
+        <div class="control">
+          <label for="candidateK">Candidate K</label>
+          <select id="candidateK">
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+          </select>
+        </div>
+
+        <div class="toggle-row">
+          <span>Hybrid retrieval</span>
+          <input id="toggleHybrid" type="checkbox" checked />
+        </div>
+
+        <div class="toggle-row">
+          <span>Use ranker</span>
+          <input id="toggleRanker" type="checkbox" checked />
+        </div>
+        <div id="rankerReason" class="toggle-note">Guardrail status not loaded yet.</div>
+
+        <div class="toggle-row">
+          <span>Show explanation</span>
+          <input id="toggleExplain" type="checkbox" />
+        </div>
+
+        <div class="actions">
+          <button id="recommendBtn" class="btn-primary">Recommend</button>
+          <button id="resetBtn" class="btn-secondary">Reset</button>
+          <button id="batchBtn" class="btn-tertiary">Run batch demo</button>
+        </div>
+
+        <div id="inputState" class="state-banner">Ready.</div>
+      </section>
+
+      <section class="panel" aria-label="Results List">
+        <h2>Section B · Results List</h2>
+        <p class="subtext">Top-N recommendations with scores, metadata, and optional explanation values.</p>
+
+        <div id="coldStartBanner" class="state-banner warn" style="display:none;">
+          Cold-start user: using popularity + category priors.
+        </div>
+        <div id="errorBanner" class="state-banner error" style="display:none;"></div>
+
+        <div id="results" class="results-wrap"></div>
+      </section>
+
+      <section class="panel" aria-label="Debug Panel">
+        <h2>Section C · Debug / Observability</h2>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="request">Request</button>
+          <button class="tab-btn" data-tab="metrics">Metrics</button>
+          <button class="tab-btn" data-tab="guardrail">Guardrail</button>
+        </div>
+
+        <div id="tab-request" class="tab-content active">
+          <pre id="requestJson">No requests yet.</pre>
+        </div>
+
+        <div id="tab-metrics" class="tab-content">
+          <table class="metric-table" id="metricsTable">
+            <tbody></tbody>
+          </table>
+          <div class="foot">Numbers combine live request metadata + server metrics snapshots.</div>
+        </div>
+
+        <div id="tab-guardrail" class="tab-content">
+          <table class="metric-table" id="guardrailTable">
+            <tbody></tbody>
+          </table>
+          <div class="foot">Guardrail confidence and drift status come from backend telemetry artifacts.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      telemetry: null,
+      users: [],
+      lastResponse: null,
+      rankerTouched: false,
+      batchRunning: false,
+      batchStop: false,
+    };
+
+    const els = {
+      apiStatus: document.getElementById("apiStatus"),
+      modelChip: document.getElementById("modelChip"),
+      candidateChip: document.getElementById("candidateChip"),
+      rankerChip: document.getElementById("rankerChip"),
+      latencyChip: document.getElementById("latencyChip"),
+      liftChip: document.getElementById("liftChip"),
+      userSelect: document.getElementById("userSelect"),
+      userIdFallback: document.getElementById("userIdFallback"),
+      topN: document.getElementById("topN"),
+      candidateK: document.getElementById("candidateK"),
+      toggleHybrid: document.getElementById("toggleHybrid"),
+      toggleRanker: document.getElementById("toggleRanker"),
+      toggleExplain: document.getElementById("toggleExplain"),
+      rankerReason: document.getElementById("rankerReason"),
+      recommendBtn: document.getElementById("recommendBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+      batchBtn: document.getElementById("batchBtn"),
+      inputState: document.getElementById("inputState"),
+      coldStartBanner: document.getElementById("coldStartBanner"),
+      errorBanner: document.getElementById("errorBanner"),
+      results: document.getElementById("results"),
+      requestJson: document.getElementById("requestJson"),
+      metricsTable: document.getElementById("metricsTable").querySelector("tbody"),
+      guardrailTable: document.getElementById("guardrailTable").querySelector("tbody"),
+    };
+
+    function fmt(value, digits = 3) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return "--";
+      }
+      return Number(value).toFixed(digits);
+    }
+
+    function fmtMs(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return "--";
+      }
+      return `${Math.round(Number(value))} ms`;
+    }
+
+    function fmtPct(value, digits = 1) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return "--";
+      }
+      return `${(Number(value) * 100).toFixed(digits)}%`;
+    }
+
+    function escapeHtml(raw) {
+      return String(raw)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    async function fetchJson(url, options = {}, timeoutMs = 8000) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        const text = await response.text();
+        let payload = null;
+        if (text) {
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = { raw: text };
+          }
+        }
+        if (!response.ok) {
+          const detail = payload && payload.detail ? payload.detail : `${response.status} ${response.statusText}`;
+          throw new Error(String(detail));
+        }
+        return payload;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    function setApiStatus(ok) {
+      els.apiStatus.textContent = ok ? "API: OK" : "API: DOWN";
+      els.apiStatus.classList.toggle("ok", ok);
+      els.apiStatus.classList.toggle("down", !ok);
+    }
+
+    function updateHeaderChips() {
+      const telemetry = state.telemetry || {};
+      const lastEval = telemetry.last_eval || {};
+      const model = telemetry.model || {};
+      const latency = telemetry.latency || {};
+
+      els.modelChip.textContent = `Model: ${model.label || "hybrid+ltr"}`;
+      els.candidateChip.textContent = `Candidate K: ${els.candidateK.value}`;
+      els.rankerChip.textContent = `Ranker: ${els.toggleRanker.checked ? "enabled" : "disabled"}`;
+      const liveP95 = state.lastResponse && state.lastResponse.metrics ? state.lastResponse.metrics.p95_ms : null;
+      els.latencyChip.textContent = `p95 latency: ${fmtMs(liveP95 ?? latency.p95_ms)}`;
+
+      const ci = Array.isArray(lastEval.ci95) ? lastEval.ci95 : [null, null];
+      els.liftChip.textContent = `Last eval lift: ${fmt(lastEval.abs_lift_ndcg10, 4)} abs NDCG@10 (CI ${fmt(ci[0], 4)}..${fmt(ci[1], 4)})`;
+
+      const guardrail = telemetry.guardrail || {};
+      const drift = telemetry.drift || {};
+      if (!state.rankerTouched) {
+        els.toggleRanker.checked = Boolean(model.ranker_default_enabled);
+      }
+      let reason = guardrail.reason || "guardrail status unavailable";
+      if (
+        state.rankerTouched &&
+        typeof model.ranker_default_enabled === "boolean" &&
+        els.toggleRanker.checked !== Boolean(model.ranker_default_enabled)
+      ) {
+        reason += " · manual override";
+      }
+      if (drift.warning) {
+        reason += " · drift warning active";
+      }
+      els.rankerReason.textContent = reason;
+    }
+
+    function setInputState(message, mode = "normal") {
+      els.inputState.textContent = message;
+      els.inputState.classList.remove("warn", "error");
+      if (mode === "warn") {
+        els.inputState.classList.add("warn");
+      }
+      if (mode === "error") {
+        els.inputState.classList.add("error");
+      }
+    }
+
+    function renderSkeleton() {
+      els.results.innerHTML = [1, 2, 3].map(() => '<div class="skeleton"></div>').join("");
+    }
+
+    function renderEmpty(message) {
+      els.results.innerHTML = `<div class="state-banner">${escapeHtml(message)}</div>`;
+    }
+
+    function renderResults(payload) {
+      const recs = Array.isArray(payload.recommendations) ? payload.recommendations : [];
+      if (!recs.length) {
+        renderEmpty("No recommendations returned.");
+        return;
+      }
+
+      const cards = recs.map((rec) => {
+        const genres = String(rec.genres || "unknown")
+          .split("|")
+          .filter(Boolean)
+          .slice(0, 5)
+          .map((g) => `<span class="tag">${escapeHtml(g)}</span>`)
+          .join("");
+
+        const explanation = rec.explanation;
+        let explanationHtml = "";
+        if (els.toggleExplain.checked && explanation) {
+          const featureValues = explanation.feature_values || {};
+          const topFeatures = Object.entries(featureValues)
+            .filter(([, value]) => Number.isFinite(Number(value)))
+            .sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))
+            .slice(0, 3)
+            .map(([name, value]) => `<span class="feature-chip">${escapeHtml(name)}=${fmt(value, 4)}</span>`)
+            .join("");
+
+          explanationHtml = `
+            <details>
+              <summary>Why this item</summary>
+              <div class="exp-grid">
+                <div>retrieval_score: <strong>${fmt(explanation.retrieval_score, 5)}</strong></div>
+                <div>ranker_score: <strong>${explanation.ranker_score === null ? "--" : fmt(explanation.ranker_score, 5)}</strong></div>
+                <div>retrieval_rank: <strong>${fmt(explanation.retrieval_rank, 1)}</strong></div>
+                <div>rrf_score: <strong>${explanation.rrf_score === null ? "--" : fmt(explanation.rrf_score, 5)}</strong></div>
+              </div>
+              <div class="feature-top">
+                ${topFeatures || '<span class="feature-chip">No feature values available</span>'}
+              </div>
+            </details>
+          `;
+        }
+
+        return `
+          <article class="result-card">
+            <div class="result-head">
+              <div>
+                <h3 class="item-title">${escapeHtml(rec.title || `Item ${rec.item_id}`)}</h3>
+                <div class="tag-row">${genres || '<span class="tag">unknown</span>'}</div>
+              </div>
+              <span class="rank-badge">#${escapeHtml(rec.rank)}</span>
+            </div>
+            <div class="metric-line">
+              <span>score <code>${fmt(rec.score, 5)}</code></span>
+              <span>type <code>${escapeHtml(rec.score_type || "unknown")}</code></span>
+              <span>item_id <code>${escapeHtml(rec.item_id)}</code></span>
+            </div>
+            ${explanationHtml}
+          </article>
+        `;
+      });
+
+      els.results.innerHTML = cards.join("");
+    }
+
+    function renderRequestTab(payload) {
+      const requestView = {
+        timestamp_utc: payload.timestamp_utc,
+        request_id: payload.request_id,
+        request_params: payload.params,
+        model: payload.model,
+        metrics: payload.metrics,
+        cold_start: payload.cold_start,
+      };
+      els.requestJson.textContent = JSON.stringify(requestView, null, 2);
+    }
+
+    function tableRow(label, value) {
+      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td></tr>`;
+    }
+
+    function renderMetricsTab(payload) {
+      const metrics = payload.metrics || {};
+      const rows = [
+        tableRow("p50 latency", fmtMs(metrics.p50_ms)),
+        tableRow("p95 latency", fmtMs(metrics.p95_ms)),
+        tableRow("end-to-end latency", fmtMs(metrics.latency_ms)),
+        tableRow("candidate_count", String(metrics.candidate_count ?? "--")),
+        tableRow("retrieval_time_ms", fmtMs(metrics.retrieval_time_ms)),
+        tableRow("ranking_time_ms", fmtMs(metrics.ranking_time_ms)),
+        tableRow("cache_hit", String(metrics.cache_hit ?? "--")),
+      ];
+      els.metricsTable.innerHTML = rows.join("");
+    }
+
+    function renderGuardrailTab(payload) {
+      const guardrail = payload.guardrail || {};
+      const telemetry = state.telemetry || {};
+      const drift = telemetry.drift || {};
+      const ci = Array.isArray(guardrail.ci95) ? guardrail.ci95 : [null, null];
+
+      const rows = [
+        tableRow("guardrail_enabled", String(guardrail.enabled ?? false)),
+        tableRow("ranker_used", String(guardrail.ranker_used ?? false)),
+        tableRow("P(lift > 0)", fmt(guardrail.p_lift_gt_zero, 4)),
+        tableRow("median_lift", fmt(guardrail.median_lift, 4)),
+        tableRow("ci95", `[${fmt(ci[0], 4)}, ${fmt(ci[1], 4)}]`),
+        tableRow("drift_warning", String(drift.warning ?? false)),
+        tableRow("decision", String(guardrail.reason || "--")),
+      ];
+      els.guardrailTable.innerHTML = rows.join("");
+    }
+
+    async function refreshHealthAndTelemetry() {
+      try {
+        const [health, telemetry] = await Promise.all([
+          fetchJson("/health", {}, 5000),
+          fetchJson("/api/telemetry", {}, 5000),
+        ]);
+        setApiStatus(health && health.status === "ok");
+        state.telemetry = telemetry;
+        updateHeaderChips();
+      } catch (err) {
+        setApiStatus(false);
+        setInputState(`Health check failed: ${err.message}`, "warn");
+      }
+    }
+
+    async function loadUsers() {
+      try {
+        const payload = await fetchJson("/api/users?limit=200", {}, 7000);
+        const users = Array.isArray(payload.users) ? payload.users : [];
+        state.users = users;
+
+        if (!users.length) {
+          els.userSelect.innerHTML = '<option value="">No users available</option>';
+          setInputState("No users from /api/users; use manual user_id field.", "warn");
+          return;
+        }
+
+        els.userSelect.innerHTML = users
+          .map((u) => {
+            const genres = Array.isArray(u.top_genres) && u.top_genres.length ? ` · ${u.top_genres.slice(0, 2).join(",")}` : "";
+            return `<option value="${u.user_id}">user ${u.user_id} · activity ${u.activity}${escapeHtml(genres)}</option>`;
+          })
+          .join("");
+
+        setInputState(`Loaded ${users.length} users.`);
+      } catch (err) {
+        els.userSelect.innerHTML = '<option value="">Failed to load users</option>';
+        setInputState(`Failed loading users: ${err.message}`, "error");
+      }
+    }
+
+    function activeUserId() {
+      const manual = els.userIdFallback.value.trim();
+      if (manual) {
+        return Number(manual);
+      }
+      const selected = els.userSelect.value;
+      if (!selected) {
+        return NaN;
+      }
+      return Number(selected);
+    }
+
+    async function runRecommend() {
+      const userId = activeUserId();
+      if (!Number.isFinite(userId) || userId <= 0) {
+        setInputState("Select a valid user_id first.", "error");
+        return;
+      }
+
+      const params = new URLSearchParams({
+        user_id: String(userId),
+        n: String(els.topN.value),
+        candidate_k: String(els.candidateK.value),
+        retrieval_mode: els.toggleHybrid.checked ? "hybrid" : "two_tower",
+        use_ranker: els.toggleRanker.checked ? "true" : "false",
+        explain: els.toggleExplain.checked ? "true" : "false",
+      });
+
+      els.errorBanner.style.display = "none";
+      els.coldStartBanner.style.display = "none";
+      renderSkeleton();
+      setInputState("Request in flight...");
+      els.recommendBtn.disabled = true;
+
+      try {
+        const payload = await fetchJson(`/recommend?${params.toString()}`, {}, 12000);
+        state.lastResponse = payload;
+
+        renderResults(payload);
+        renderRequestTab(payload);
+        renderMetricsTab(payload);
+        renderGuardrailTab(payload);
+
+        els.coldStartBanner.style.display = payload.cold_start ? "block" : "none";
+        setInputState(`request_id=${payload.request_id} · ${fmtMs(payload.metrics?.latency_ms)}`);
+      } catch (err) {
+        renderEmpty("Request failed.");
+        els.errorBanner.textContent = `Recommend failed: ${err.message}`;
+        els.errorBanner.style.display = "block";
+        setInputState(`Recommend failed: ${err.message}`, "error");
+      } finally {
+        els.recommendBtn.disabled = false;
+        updateHeaderChips();
+      }
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function runBatchDemo() {
+      if (state.batchRunning) {
+        state.batchStop = true;
+        els.batchBtn.disabled = true;
+        return;
+      }
+
+      if (!state.users.length) {
+        setInputState("Batch demo needs users from /api/users.", "warn");
+        return;
+      }
+
+      state.batchRunning = true;
+      state.batchStop = false;
+      els.batchBtn.textContent = "Stop batch demo";
+      setInputState("Running batch demo across 5 users...");
+
+      const users = state.users.slice(0, 5);
+      for (const user of users) {
+        if (state.batchStop) {
+          break;
+        }
+        els.userSelect.value = String(user.user_id);
+        await runRecommend();
+        await sleep(900);
+      }
+
+      state.batchRunning = false;
+      state.batchStop = false;
+      els.batchBtn.disabled = false;
+      els.batchBtn.textContent = "Run batch demo";
+      setInputState("Batch demo complete.");
+    }
+
+    function resetControls() {
+      els.topN.value = "10";
+      els.candidateK.value = "200";
+      els.toggleHybrid.checked = true;
+      els.toggleExplain.checked = false;
+      els.userIdFallback.value = "";
+      if (state.telemetry && state.telemetry.model) {
+        els.toggleRanker.checked = Boolean(state.telemetry.model.ranker_default_enabled);
+      } else {
+        els.toggleRanker.checked = true;
+      }
+      state.rankerTouched = false;
+      updateHeaderChips();
+      renderEmpty("Controls reset. Click Recommend.");
+      setInputState("Controls reset.");
+    }
+
+    function wireTabs() {
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const target = btn.dataset.tab;
+          document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+          document.querySelectorAll(".tab-content").forEach((p) => p.classList.remove("active"));
+          btn.classList.add("active");
+          document.getElementById(`tab-${target}`).classList.add("active");
+        });
+      });
+    }
+
+    function wireEvents() {
+      els.recommendBtn.addEventListener("click", runRecommend);
+      els.resetBtn.addEventListener("click", resetControls);
+      els.batchBtn.addEventListener("click", runBatchDemo);
+      els.toggleRanker.addEventListener("change", () => {
+        state.rankerTouched = true;
+        updateHeaderChips();
+      });
+      els.candidateK.addEventListener("change", updateHeaderChips);
+      els.toggleHybrid.addEventListener("change", updateHeaderChips);
+      els.toggleExplain.addEventListener("change", () => {
+        if (state.lastResponse) {
+          renderResults(state.lastResponse);
+        }
+      });
+    }
+
+    async function init() {
+      wireTabs();
+      wireEvents();
+      renderEmpty("No recommendations yet.");
+      await refreshHealthAndTelemetry();
+      await loadUsers();
+      updateHeaderChips();
+
+      setInterval(refreshHealthAndTelemetry, 10000);
+    }
+
+    init();
+  </script>
+</body>
+</html>
