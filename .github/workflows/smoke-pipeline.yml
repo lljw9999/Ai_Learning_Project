@@ -46,7 +46,7 @@ jobs:
           python eval/retrieval_baselines.py --top-k 120
 
       - name: Upload evaluation artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-eval-artifacts
           path: |
